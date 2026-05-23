@@ -3,6 +3,7 @@
 
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
+import json
 import math
 
 
@@ -222,17 +223,24 @@ class DryerApp(tk.Tk):
                                    command=self.save_results)
         self.btn_clear = ttk.Button(self.bar, text="Очистить",
                                     command=self.clear)
+        self.btn_load_in = ttk.Button(self.bar, text="Загрузить исходные данные",
+                                      command=self.load_inputs)
+        self.btn_save_in = ttk.Button(self.bar, text="Сохранить исходные данные",
+                                      command=self.save_inputs)
 
         self.nb.bind("<<NotebookTabChanged>>", self._update_buttons)
         self._update_buttons()
 
     def _update_buttons(self, _event=None):
-        for btn in (self.btn_calc, self.btn_save, self.btn_clear):
+        for btn in (self.btn_calc, self.btn_save, self.btn_clear,
+                    self.btn_load_in, self.btn_save_in):
             btn.pack_forget()
         idx = self.nb.index(self.nb.select())
         if idx == 0:  # Исходные данные
             self.btn_calc.pack(side=tk.RIGHT, padx=6, pady=5)
             self.btn_clear.pack(side=tk.RIGHT, padx=2, pady=5)
+            self.btn_load_in.pack(side=tk.LEFT, padx=(6, 2), pady=5)
+            self.btn_save_in.pack(side=tk.LEFT, padx=2, pady=5)
         elif idx == 1:  # Результаты
             self.btn_save.pack(side=tk.RIGHT, padx=6, pady=5)
         # I–x диаграмма (idx == 2) — без кнопок
@@ -567,6 +575,65 @@ class DryerApp(tk.Tk):
             c.create_text(ml + 40, ly, text=txt,
                           font=("Helvetica", 8), anchor="w")
             ly += 18
+
+    # ── сохранение / загрузка исходных данных ────────────────────
+    def save_inputs(self):
+        path = filedialog.asksaveasfilename(
+            defaultextension=".json",
+            filetypes=[("JSON-файл исходных данных", "*.json"), ("Все файлы", "*.*")],
+            title="Сохранить исходные данные",
+        )
+        if not path:
+            return
+        try:
+            data = {k: var.get() for k, var in self.v.items()}
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump(data, fh, ensure_ascii=False, indent=2)
+        except (OSError, tk.TclError) as exc:
+            messagebox.showerror("Ошибка сохранения", str(exc))
+            return
+        messagebox.showinfo("Сохранено", f"Исходные данные сохранены:\n{path}")
+
+    def load_inputs(self):
+        path = filedialog.askopenfilename(
+            filetypes=[("JSON-файл исходных данных", "*.json"), ("Все файлы", "*.*")],
+            title="Загрузить исходные данные",
+        )
+        if not path:
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+        except (OSError, json.JSONDecodeError) as exc:
+            messagebox.showerror("Ошибка загрузки", f"Не удалось прочитать файл:\n{exc}")
+            return
+
+        if not isinstance(data, dict):
+            messagebox.showerror("Ошибка загрузки",
+                                 "Файл не содержит корректного набора исходных данных.")
+            return
+
+        unknown = set(data) - set(self.v)
+        missing = set(self.v) - set(data)
+        try:
+            for key, var in self.v.items():
+                if key in data:
+                    var.set(data[key])
+        except tk.TclError as exc:
+            messagebox.showerror("Ошибка загрузки",
+                                 f"Некорректное значение в файле: {exc}")
+            return
+
+        self._toggle_losses()
+        notes = []
+        if missing:
+            notes.append("Отсутствуют поля: " + ", ".join(sorted(missing)))
+        if unknown:
+            notes.append("Проигнорированы неизвестные поля: " + ", ".join(sorted(unknown)))
+        msg = f"Исходные данные загружены:\n{path}"
+        if notes:
+            msg += "\n\n" + "\n".join(notes)
+        messagebox.showinfo("Загружено", msg)
 
     # ── сохранение ───────────────────────────────────────────────
     def save_results(self):
