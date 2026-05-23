@@ -297,6 +297,60 @@ class DryerApp(tk.Tk):
                   foreground="gray", font=("Helvetica", 9)).grid(
             row=1, column=0, columnspan=3, sticky="w", pady=(4, 0))
 
+        # Краткая теория
+        fi = ttk.LabelFrame(parent, text=" Краткая теория конвективной сушки ", padding=10)
+        fi.grid(row=2, column=0, columnspan=2, sticky="nsew", padx=8, pady=(4, 8))
+        parent.rowconfigure(2, weight=1)
+        fi.rowconfigure(0, weight=1)
+        fi.columnconfigure(0, weight=1)
+
+        info = tk.Text(fi, wrap=tk.WORD, height=12,
+                       bg="#fafafa", relief=tk.FLAT,
+                       font=("Helvetica", 9), padx=8, pady=4)
+        vsb = ttk.Scrollbar(fi, orient="vertical", command=info.yview)
+        info.configure(yscrollcommand=vsb.set)
+        info.grid(row=0, column=0, sticky="nsew")
+        vsb.grid(row=0, column=1, sticky="ns")
+
+        info.tag_configure("h", font=("Helvetica", 9, "bold"),
+                           foreground="#1a5276", spacing1=4, spacing3=2)
+        info.tag_configure("b", font=("Helvetica", 9, "bold"))
+
+        def add(text, tag=None):
+            info.insert(tk.END, text, tag or "")
+
+        add("Сущность процесса\n", "h")
+        add("Конвективная сушка — удаление влаги из материала за счёт прямого контакта "
+            "с нагретым сушильным агентом (обычно воздухом). Тепло передаётся от воздуха "
+            "к материалу, влага испаряется с поверхности и уносится потоком.\n\n")
+
+        add("Характерные точки процесса\n", "h")
+        add("  0 — свежий атмосферный воздух (t₀, φ₀);\n"
+            "  1 — воздух после калорифера: нагрев при постоянном влагосодержании "
+            "(x₁ = x₀), I и t растут;\n"
+            "  2 — воздух на выходе из сушильной камеры: контактируя с материалом, "
+            "воздух отдаёт тепло и насыщается влагой (x растёт, t падает).\n\n")
+
+        add("Основные уравнения\n", "h")
+        add("  • Масса испарённой влаги:  W = G₁·(w₁ − w₂) / (100 − w₂)\n"
+            "  • Удельный расход сухого воздуха:  l = 1 / (x₂ − x₀)\n"
+            "  • Массовый расход воздуха:  L = l · W\n"
+            "  • Тепловая нагрузка калорифера:  Q = L · (I₁ − I₀)\n"
+            "  • Удельный расход тепла на испарение:  q′ = Q / W\n\n")
+
+        add("Идеальная и реальная сушилки\n", "h")
+        add("В ", )
+        add("идеальной", "b")
+        add(" сушилке тепловые потери отсутствуют и дополнительный нагрев материала "
+            "не учитывается: процесс 1→2 идёт по линии I = const на I–x диаграмме "
+            "(адиабатическое насыщение). В ")
+        add("реальной", "b")
+        add(" сушилке часть тепла теряется в окружающую среду и затрачивается на "
+            "нагрев самого материала, поэтому I₂ < I₁, а удельный расход воздуха и "
+            "тепла увеличивается.\n")
+
+        info.config(state=tk.DISABLED)
+
     def _toggle_losses(self):
         state = tk.NORMAL if not self.v["ideal"].get() else tk.DISABLED
         self._e_loss.config(state=state)
