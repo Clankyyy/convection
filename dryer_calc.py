@@ -140,6 +140,133 @@ def run_calculation(p: dict) -> dict:
     )
 
 
+# ── абстракция рисования (для canvas и для PNG) ──────────────────
+
+class _TkDrawer:
+    """Адаптер примитивов для tkinter Canvas."""
+    def __init__(self, canvas):
+        self.c = canvas
+
+    def line(self, x1, y1, x2, y2, color, width=1, dash=False, arrow=False):
+        kw = {"fill": color, "width": width}
+        if dash:
+            kw["dash"] = (2, 4)
+        if arrow:
+            kw["arrow"] = tk.LAST
+        self.c.create_line(x1, y1, x2, y2, **kw)
+
+    def rect(self, x1, y1, x2, y2, outline):
+        self.c.create_rectangle(x1, y1, x2, y2, outline=outline)
+
+    def oval(self, cx, cy, r, fill, outline):
+        self.c.create_oval(cx - r, cy - r, cx + r, cy + r,
+                           fill=fill, outline=outline)
+
+    def text(self, x, y, text, size, anchor="center", color="black",
+             bold=False, angle=0):
+        font = ("Helvetica", size, "bold") if bold else ("Helvetica", size)
+        self.c.create_text(x, y, text=text, font=font,
+                           anchor=anchor, fill=color, angle=angle)
+
+
+class _PilDrawer:
+    """Адаптер примитивов для PIL.ImageDraw (для экспорта в PNG/JPEG)."""
+
+    _FONT_CANDIDATES = (
+        # Linux (DejaVu идёт почти везде по умолчанию)
+        ("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
+        # Windows
+        ("C:/Windows/Fonts/arialbd.ttf", "C:/Windows/Fonts/arial.ttf"),
+        # macOS / общий поиск по имени
+        ("DejaVuSans-Bold.ttf", "DejaVuSans.ttf"),
+        ("Arial Bold.ttf", "Arial.ttf"),
+        ("arialbd.ttf", "arial.ttf"),
+    )
+
+    def __init__(self, image):
+        from PIL import ImageDraw  # импорт здесь, чтобы Pillow не был обязателен для GUI
+        self.img = image
+        self.draw = ImageDraw.Draw(image)
+        self._font_cache = {}
+
+    def _font(self, size, bold=False):
+        from PIL import ImageFont
+        key = (size, bold)
+        if key in self._font_cache:
+            return self._font_cache[key]
+        for bold_path, reg_path in self._FONT_CANDIDATES:
+            try:
+                font = ImageFont.truetype(bold_path if bold else reg_path, size)
+                self._font_cache[key] = font
+                return font
+            except (OSError, IOError):
+                continue
+        font = ImageFont.load_default()
+        self._font_cache[key] = font
+        return font
+
+    def line(self, x1, y1, x2, y2, color, width=1, dash=False, arrow=False):
+        if dash:
+            self._dashed_line(x1, y1, x2, y2, color, width)
+        else:
+            self.draw.line([(x1, y1), (x2, y2)], fill=color, width=width)
+        if arrow:
+            self._arrow_head(x1, y1, x2, y2, color)
+
+    def _dashed_line(self, x1, y1, x2, y2, color, width):
+        dx, dy = x2 - x1, y2 - y1
+        length = math.hypot(dx, dy)
+        if length == 0:
+            return
+        nx, ny = dx / length, dy / length
+        seg, gap = 4.0, 4.0
+        d = 0.0
+        while d < length:
+            s = d
+            e = min(d + seg, length)
+            self.draw.line(
+                [(x1 + nx * s, y1 + ny * s),
+                 (x1 + nx * e, y1 + ny * e)],
+                fill=color, width=width)
+            d += seg + gap
+
+    def _arrow_head(self, x1, y1, x2, y2, color, size=9):
+        angle = math.atan2(y2 - y1, x2 - x1)
+        a = math.radians(25)
+        p1 = (x2 - size * math.cos(angle - a),
+              y2 - size * math.sin(angle - a))
+        p2 = (x2 - size * math.cos(angle + a),
+              y2 - size * math.sin(angle + a))
+        self.draw.polygon([(x2, y2), p1, p2], fill=color)
+
+    def rect(self, x1, y1, x2, y2, outline):
+        self.draw.rectangle([(x1, y1), (x2, y2)], outline=outline)
+
+    def oval(self, cx, cy, r, fill, outline):
+        self.draw.ellipse([(cx - r, cy - r), (cx + r, cy + r)],
+                          fill=fill, outline=outline)
+
+    def text(self, x, y, text, size, anchor="center", color="black",
+             bold=False, angle=0):
+        from PIL import Image, ImageDraw
+        font = self._font(size, bold)
+        if angle == 0:
+            pil_anchor = {"center": "mm", "w": "lm", "e": "rm"}.get(anchor, "mm")
+            self.draw.text((x, y), text, font=font, fill=color, anchor=pil_anchor)
+            return
+        # Повёрнутый текст: рисуем в отдельный буфер, поворачиваем, вставляем.
+        bbox = font.getbbox(text)
+        bw, bh = bbox[2] - bbox[0] + 4, bbox[3] - bbox[1] + 4
+        txt = Image.new("RGBA", (bw, bh), (0, 0, 0, 0))
+        ImageDraw.Draw(txt).text((2 - bbox[0], 2 - bbox[1]),
+                                 text, font=font, fill=color)
+        txt = txt.rotate(angle, expand=True, resample=Image.BICUBIC)
+        self.img.paste(txt,
+                       (int(x - txt.width / 2), int(y - txt.height / 2)),
+                       txt)
+
+
 # ── GUI ──────────────────────────────────────────────────────────
 
 class DryerApp(tk.Tk):
@@ -227,13 +354,15 @@ class DryerApp(tk.Tk):
                                       command=self.load_inputs)
         self.btn_save_in = ttk.Button(self.bar, text="Сохранить исходные данные",
                                       command=self.save_inputs)
+        self.btn_save_dia = ttk.Button(self.bar, text="Сохранить диаграмму",
+                                       command=self.save_diagram)
 
         self.nb.bind("<<NotebookTabChanged>>", self._update_buttons)
         self._update_buttons()
 
     def _update_buttons(self, _event=None):
         for btn in (self.btn_calc, self.btn_save, self.btn_clear,
-                    self.btn_load_in, self.btn_save_in):
+                    self.btn_load_in, self.btn_save_in, self.btn_save_dia):
             btn.pack_forget()
         idx = self.nb.index(self.nb.select())
         if idx == 0:  # Исходные данные
@@ -243,7 +372,8 @@ class DryerApp(tk.Tk):
         elif idx == 1:  # Результаты
             self.btn_save.pack(side=tk.RIGHT, padx=6, pady=5)
             self.btn_clear.pack(side=tk.RIGHT, padx=2, pady=5)
-        # I–x диаграмма (idx == 2) — без кнопок
+        elif idx == 2:  # I–x диаграмма
+            self.btn_save_dia.pack(side=tk.RIGHT, padx=6, pady=5)
 
     # ── вкладка исходных данных ──────────────────────────────────
     def _build_input(self, parent):
@@ -586,25 +716,25 @@ class DryerApp(tk.Tk):
 
     # ── I–x диаграмма ────────────────────────────────────────────
     def _redraw_diagram(self):
-        c = self.canvas
-        c.delete("all")
-        r = self._diagram_data
-        cw = c.winfo_width()
-        ch = c.winfo_height()
+        self.canvas.delete("all")
+        cw = self.canvas.winfo_width()
+        ch = self.canvas.winfo_height()
         if cw < 100 or ch < 100:
             return
+        self._paint_diagram(_TkDrawer(self.canvas), cw, ch)
+
+    def _paint_diagram(self, d, cw, ch):
+        r = self._diagram_data
         if r is None:
-            c.create_text(cw // 2, ch // 2,
-                          text="Выполните расчёт, чтобы увидеть диаграмму",
-                          fill="gray", font=("Helvetica", 11))
+            d.text(cw // 2, ch // 2,
+                   "Выполните расчёт, чтобы увидеть диаграмму",
+                   11, color="gray")
             return
 
-        # Поля
         ml, mr, mt, mb = 70, 20, 30, 50
         pw = cw - ml - mr
         ph = ch - mt - mb
 
-        # Диапазоны осей
         x_pts = [r["x0"], r["x1"], r["x2"]]
         I_pts = [r["I0"], r["I1"], r["I2"]]
 
@@ -613,7 +743,6 @@ class DryerApp(tk.Tk):
             x_max = max(x_pts) * 1.15
             I_min = min(I_pts) * 0.92
             I_max = max(I_pts) * 1.08
-            # Показываем рассчитанные значения в полях (x в г/кг с.в.)
             self.ix_x_min.set(round(x_min * 1000, 3))
             self.ix_x_max.set(round(x_max * 1000, 3))
             self.ix_I_min.set(round(I_min, 2))
@@ -625,15 +754,14 @@ class DryerApp(tk.Tk):
                 I_min = self.ix_I_min.get()
                 I_max = self.ix_I_max.get()
             except tk.TclError:
-                c.create_text(cw // 2, ch // 2,
-                              text="Некорректные значения масштаба",
-                              fill="#c0392b", font=("Helvetica", 11))
+                d.text(cw // 2, ch // 2,
+                       "Некорректные значения масштаба",
+                       11, color="#c0392b")
                 return
             if x_max <= x_min or I_max <= I_min:
-                c.create_text(cw // 2, ch // 2,
-                              text="Границы масштаба заданы неверно "
-                                   "(min должен быть меньше max)",
-                              fill="#c0392b", font=("Helvetica", 11))
+                d.text(cw // 2, ch // 2,
+                       "Границы масштаба заданы неверно (min должен быть меньше max)",
+                       11, color="#c0392b")
                 return
 
         def to_px(x, I):
@@ -645,58 +773,85 @@ class DryerApp(tk.Tk):
         for i in range(6):
             xi = x_min + i * (x_max - x_min) / 5
             px, _ = to_px(xi, I_min)
-            c.create_line(px, mt, px, mt + ph, fill="#e0e0e0", dash=(2, 4))
-            c.create_text(px, mt + ph + 14, text=f"{xi*1000:.1f}", font=("Helvetica", 8))
-
+            d.line(px, mt, px, mt + ph, "#e0e0e0", dash=True)
+            d.text(px, mt + ph + 14, f"{xi*1000:.1f}", 8)
         for i in range(6):
             Ii = I_min + i * (I_max - I_min) / 5
             _, py = to_px(x_min, Ii)
-            c.create_line(ml, py, ml + pw, py, fill="#e0e0e0", dash=(2, 4))
-            c.create_text(ml - 8, py, text=f"{Ii:.0f}", font=("Helvetica", 8), anchor="e")
+            d.line(ml, py, ml + pw, py, "#e0e0e0", dash=True)
+            d.text(ml - 8, py, f"{Ii:.0f}", 8, anchor="e")
 
         # Рамка
-        c.create_rectangle(ml, mt, ml + pw, mt + ph, outline="#555")
+        d.rect(ml, mt, ml + pw, mt + ph, outline="#555")
 
-        # Подписи осей
-        c.create_text(ml + pw // 2, ch - 8,
-                      text="x, г/кг с.в.", font=("Helvetica", 9, "bold"))
-        c.create_text(16, mt + ph // 2,
-                      text="I, кДж/кг с.в.", font=("Helvetica", 9, "bold"),
-                      angle=90)
-        c.create_text(ml + pw // 2, 14,
-                      text="I–x диаграмма (процесс сушки)",
-                      font=("Helvetica", 10, "bold"), fill="#2c3e50")
+        # Подписи осей и заголовок
+        d.text(ml + pw // 2, ch - 8, "x, г/кг с.в.", 9, bold=True)
+        d.text(16, mt + ph // 2, "I, кДж/кг с.в.", 9, bold=True, angle=90)
+        d.text(ml + pw // 2, 14, "I–x диаграмма (процесс сушки)",
+               10, bold=True, color="#2c3e50")
 
-        # Линия процесса нагрева в калорифере: 0 → 1 (x=const, I растёт)
+        # Процесс
         p0x, p0y = to_px(r["x0"], r["I0"])
         p1x, p1y = to_px(r["x1"], r["I1"])
         p2x, p2y = to_px(r["x2"], r["I2"])
+        d.line(p0x, p0y, p1x, p1y, "#e74c3c", width=2, arrow=True)
+        d.line(p1x, p1y, p2x, p2y, "#2980b9", width=2, arrow=True)
 
-        # Нагрев в калорифере (вертикальный отрезок на I-x)
-        c.create_line(p0x, p0y, p1x, p1y, fill="#e74c3c", width=2, arrow=tk.LAST)
-        # Процесс в сушилке
-        c.create_line(p1x, p1y, p2x, p2y, fill="#2980b9", width=2, arrow=tk.LAST)
-
-        # Точки и подписи
-        R = 5
+        # Точки
         for (px, py), lbl, col in [
             ((p0x, p0y), "0", "#16a085"),
             ((p1x, p1y), "1", "#e74c3c"),
             ((p2x, p2y), "2", "#2980b9"),
         ]:
-            c.create_oval(px - R, py - R, px + R, py + R, fill=col, outline=col)
-            c.create_text(px + 12, py - 10, text=lbl,
-                          font=("Helvetica", 10, "bold"), fill=col)
+            d.oval(px, py, 5, fill=col, outline=col)
+            d.text(px + 12, py - 10, lbl, 10, bold=True, color=col)
 
         # Легенда
         ly = mt + 12
         for col, txt in [("#e74c3c", "0→1: нагрев в калорифере"),
                          ("#2980b9", "1→2: процесс сушки")]:
-            c.create_line(ml + 10, ly, ml + 35, ly,
-                          fill=col, width=2)
-            c.create_text(ml + 40, ly, text=txt,
-                          font=("Helvetica", 8), anchor="w")
+            d.line(ml + 10, ly, ml + 35, ly, col, width=2)
+            d.text(ml + 40, ly, txt, 8, anchor="w")
             ly += 18
+
+    def save_diagram(self):
+        if self._diagram_data is None:
+            messagebox.showinfo("Информация",
+                                "Нет диаграммы для сохранения.\n"
+                                "Сначала выполните расчёт.")
+            return
+        try:
+            from PIL import Image  # noqa: F401
+        except ImportError:
+            messagebox.showerror(
+                "Не установлен Pillow",
+                "Для сохранения диаграммы в виде изображения требуется "
+                "пакет Pillow.\n\nУстановите его командой:\n    pip install pillow")
+            return
+        path = filedialog.asksaveasfilename(
+            defaultextension=".png",
+            filetypes=[("PNG", "*.png"),
+                       ("JPEG", "*.jpg *.jpeg"),
+                       ("Все файлы", "*.*")],
+            title="Сохранить I–x диаграмму",
+        )
+        if not path:
+            return
+        from PIL import Image
+        # Размер картинки: не меньше 1000×700, иначе по фактическому канвасу.
+        cw = max(self.canvas.winfo_width(), 1000)
+        ch = max(self.canvas.winfo_height(), 700)
+        try:
+            img = Image.new("RGB", (cw, ch), "white")
+            self._paint_diagram(_PilDrawer(img), cw, ch)
+            if path.lower().endswith((".jpg", ".jpeg")):
+                img.save(path, "JPEG", quality=95)
+            else:
+                img.save(path)
+        except (OSError, ValueError) as exc:
+            messagebox.showerror("Ошибка сохранения", str(exc))
+            return
+        messagebox.showinfo("Сохранено", f"Диаграмма сохранена:\n{path}")
 
     # ── сохранение / загрузка исходных данных ────────────────────
     def save_inputs(self):
