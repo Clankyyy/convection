@@ -238,11 +238,11 @@ class DryerApp(tk.Tk):
         idx = self.nb.index(self.nb.select())
         if idx == 0:  # Исходные данные
             self.btn_calc.pack(side=tk.RIGHT, padx=6, pady=5)
-            self.btn_clear.pack(side=tk.RIGHT, padx=2, pady=5)
             self.btn_load_in.pack(side=tk.LEFT, padx=(6, 2), pady=5)
             self.btn_save_in.pack(side=tk.LEFT, padx=2, pady=5)
         elif idx == 1:  # Результаты
             self.btn_save.pack(side=tk.RIGHT, padx=6, pady=5)
+            self.btn_clear.pack(side=tk.RIGHT, padx=2, pady=5)
         # I–x диаграмма (idx == 2) — без кнопок
 
     # ── вкладка исходных данных ──────────────────────────────────
