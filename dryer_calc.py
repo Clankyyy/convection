@@ -383,13 +383,58 @@ class DryerApp(tk.Tk):
 
     # ── вкладка I–x диаграммы ────────────────────────────────────
     def _build_diagram(self, parent):
-        parent.rowconfigure(0, weight=1)
+        parent.rowconfigure(1, weight=1)
         parent.columnconfigure(0, weight=1)
 
+        # Панель управления масштабом
+        ctrl = ttk.Frame(parent)
+        ctrl.grid(row=0, column=0, sticky="ew", padx=8, pady=(8, 0))
+
+        self.ix_auto  = tk.BooleanVar(value=True)
+        self.ix_x_min = tk.DoubleVar(value=0.0)
+        self.ix_x_max = tk.DoubleVar(value=50.0)
+        self.ix_I_min = tk.DoubleVar(value=0.0)
+        self.ix_I_max = tk.DoubleVar(value=200.0)
+
+        ttk.Checkbutton(ctrl, text="Авто масштаб",
+                        variable=self.ix_auto,
+                        command=self._toggle_ix_auto
+                        ).pack(side=tk.LEFT, padx=(0, 14))
+
+        ttk.Label(ctrl, text="x:").pack(side=tk.LEFT)
+        self.ix_e_xmin = ttk.Entry(ctrl, textvariable=self.ix_x_min, width=8)
+        self.ix_e_xmin.pack(side=tk.LEFT, padx=2)
+        ttk.Label(ctrl, text="–").pack(side=tk.LEFT)
+        self.ix_e_xmax = ttk.Entry(ctrl, textvariable=self.ix_x_max, width=8)
+        self.ix_e_xmax.pack(side=tk.LEFT, padx=2)
+        ttk.Label(ctrl, text="г/кг с.в.").pack(side=tk.LEFT, padx=(2, 14))
+
+        ttk.Label(ctrl, text="I:").pack(side=tk.LEFT)
+        self.ix_e_Imin = ttk.Entry(ctrl, textvariable=self.ix_I_min, width=8)
+        self.ix_e_Imin.pack(side=tk.LEFT, padx=2)
+        ttk.Label(ctrl, text="–").pack(side=tk.LEFT)
+        self.ix_e_Imax = ttk.Entry(ctrl, textvariable=self.ix_I_max, width=8)
+        self.ix_e_Imax.pack(side=tk.LEFT, padx=2)
+        ttk.Label(ctrl, text="кДж/кг с.в.").pack(side=tk.LEFT, padx=2)
+
+        for e in (self.ix_e_xmin, self.ix_e_xmax,
+                  self.ix_e_Imin, self.ix_e_Imax):
+            e.bind("<Return>",   lambda _e: self._redraw_diagram())
+            e.bind("<FocusOut>", lambda _e: self._redraw_diagram())
+
         self.canvas = tk.Canvas(parent, bg="white", relief=tk.SUNKEN, bd=1)
-        self.canvas.grid(row=0, column=0, sticky="nsew", padx=8, pady=8)
+        self.canvas.grid(row=1, column=0, sticky="nsew", padx=8, pady=8)
         self.canvas.bind("<Configure>", lambda e: self._redraw_diagram())
         self._diagram_data = None
+
+        self._toggle_ix_auto()
+
+    def _toggle_ix_auto(self):
+        state = tk.DISABLED if self.ix_auto.get() else tk.NORMAL
+        for e in (self.ix_e_xmin, self.ix_e_xmax,
+                  self.ix_e_Imin, self.ix_e_Imax):
+            e.config(state=state)
+        self._redraw_diagram()
 
     # ── очистка ─────────────────────────────────────────────────
     def clear(self):
@@ -563,10 +608,33 @@ class DryerApp(tk.Tk):
         x_pts = [r["x0"], r["x1"], r["x2"]]
         I_pts = [r["I0"], r["I1"], r["I2"]]
 
-        x_min = max(0.0, min(x_pts) * 0.85)
-        x_max = max(x_pts) * 1.15
-        I_min = min(I_pts) * 0.92
-        I_max = max(I_pts) * 1.08
+        if self.ix_auto.get():
+            x_min = max(0.0, min(x_pts) * 0.85)
+            x_max = max(x_pts) * 1.15
+            I_min = min(I_pts) * 0.92
+            I_max = max(I_pts) * 1.08
+            # Показываем рассчитанные значения в полях (x в г/кг с.в.)
+            self.ix_x_min.set(round(x_min * 1000, 3))
+            self.ix_x_max.set(round(x_max * 1000, 3))
+            self.ix_I_min.set(round(I_min, 2))
+            self.ix_I_max.set(round(I_max, 2))
+        else:
+            try:
+                x_min = self.ix_x_min.get() / 1000.0
+                x_max = self.ix_x_max.get() / 1000.0
+                I_min = self.ix_I_min.get()
+                I_max = self.ix_I_max.get()
+            except tk.TclError:
+                c.create_text(cw // 2, ch // 2,
+                              text="Некорректные значения масштаба",
+                              fill="#c0392b", font=("Helvetica", 11))
+                return
+            if x_max <= x_min or I_max <= I_min:
+                c.create_text(cw // 2, ch // 2,
+                              text="Границы масштаба заданы неверно "
+                                   "(min должен быть меньше max)",
+                              fill="#c0392b", font=("Helvetica", 11))
+                return
 
         def to_px(x, I):
             px = ml + (x - x_min) / (x_max - x_min) * pw
