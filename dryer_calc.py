@@ -214,14 +214,28 @@ class DryerApp(tk.Tk):
         self._build_diagram(tab_ixd)
 
         # Нижняя панель кнопок
-        bar = tk.Frame(self, relief=tk.GROOVE, bd=1, bg="#ecf0f1")
-        bar.pack(fill=tk.X, padx=8, pady=(0, 6))
-        ttk.Button(bar, text="Рассчитать",
-                   command=self.calculate).pack(side=tk.RIGHT, padx=6, pady=5)
-        ttk.Button(bar, text="Сохранить результаты",
-                   command=self.save_results).pack(side=tk.RIGHT, padx=2, pady=5)
-        ttk.Button(bar, text="Очистить",
-                   command=self.clear).pack(side=tk.RIGHT, padx=2, pady=5)
+        self.bar = tk.Frame(self, relief=tk.GROOVE, bd=1, bg="#ecf0f1")
+        self.bar.pack(fill=tk.X, padx=8, pady=(0, 6))
+        self.btn_calc = ttk.Button(self.bar, text="Рассчитать",
+                                   command=self.calculate)
+        self.btn_save = ttk.Button(self.bar, text="Сохранить результаты",
+                                   command=self.save_results)
+        self.btn_clear = ttk.Button(self.bar, text="Очистить",
+                                    command=self.clear)
+
+        self.nb.bind("<<NotebookTabChanged>>", self._update_buttons)
+        self._update_buttons()
+
+    def _update_buttons(self, _event=None):
+        for btn in (self.btn_calc, self.btn_save, self.btn_clear):
+            btn.pack_forget()
+        idx = self.nb.index(self.nb.select())
+        if idx == 0:  # Исходные данные
+            self.btn_calc.pack(side=tk.RIGHT, padx=6, pady=5)
+            self.btn_clear.pack(side=tk.RIGHT, padx=2, pady=5)
+        elif idx == 1:  # Результаты
+            self.btn_save.pack(side=tk.RIGHT, padx=6, pady=5)
+        # I–x диаграмма (idx == 2) — без кнопок
 
     # ── вкладка исходных данных ──────────────────────────────────
     def _build_input(self, parent):
